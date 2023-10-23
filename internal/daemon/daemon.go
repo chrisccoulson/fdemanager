@@ -51,6 +51,10 @@ var (
 	shutdownTimeout = 25 * time.Second
 )
 
+type contextKey string
+
+var connectionKey contextKey = "net-conn"
+
 type connTracker struct {
 	mu    sync.Mutex
 	conns map[net.Conn]struct{}
@@ -219,7 +223,7 @@ func (d *Daemon) Start() error {
 	if err != nil {
 		return fmt.Errorf("cannot listen on %s: %v", paths.ManagerSocket, err)
 	}
-	d.listener = &ucrednetListener{Listener: listener}
+	d.listener = listener
 	d.socketActivated = activated
 	if activated {
 		logger.Debugf("socket %q was activated", paths.ManagerSocket)
@@ -231,6 +235,12 @@ func (d *Daemon) Start() error {
 	d.serve = &http.Server{
 		Handler:   logit(d.router),
 		ConnState: d.connTracker.TrackConn,
+		ConnContext: func(ctx context.Context, c net.Conn) context.Context {
+			// associate the connection with the context that gets attached
+			// to each request, so that we can obtain the connection in the
+			// handler.
+			return context.WithValue(ctx, connectionKey, c)
+		},
 	}
 
 	d.initStandbyHandling()

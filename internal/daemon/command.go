@@ -20,12 +20,16 @@
 package daemon
 
 import (
+	"net"
 	"net/http"
 	"strconv"
 
 	"github.com/snapcore/fdemanager/client"
+	"github.com/snapcore/fdemanager/internal/netutil"
 	"github.com/snapcore/snapd/logger"
 )
+
+var netutilConnPeerCred = netutil.ConnPeerCred
 
 // A responseFunc handles one of the individual verbs for a method
 type responseFunc func(*Daemon, *http.Request) response
@@ -45,9 +49,15 @@ type command struct {
 }
 
 func (c *command) Run(d *Daemon, r *http.Request) response {
-	ucred, err := ucrednetGet(r.RemoteAddr)
-	if err != nil && err != errNoID {
-		logger.Noticef("unexpected error when attempting to get UID: %s", err)
+	// obtain the connection associated with the context attached to this
+	// request (see Daemon.Start).
+	conn, ok := r.Context().Value(connectionKey).(net.Conn)
+	if !ok {
+		logger.Panicf("no connection associated with request")
+	}
+	ucred, err := netutilConnPeerCred(conn)
+	if err != nil {
+		logger.Noticef("unexpected error when attempting to obtain peer credentials: %v", err)
 		return statusInternalError(err.Error())
 	}
 
@@ -76,6 +86,7 @@ func (c *command) Run(d *Daemon, r *http.Request) response {
 	allowInteraction := false
 	allowHeader := r.Header.Get(client.AllowInteractionHeader)
 	if allowHeader != "" {
+		var err error
 		allowInteraction, err = strconv.ParseBool(allowHeader)
 		if err != nil {
 			logger.Noticef("error parsing %s header: %s", client.AllowInteractionHeader, err)

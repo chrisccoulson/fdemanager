@@ -19,28 +19,28 @@
 
 package daemon
 
-import sys "syscall"
+import (
+	"net"
+	"syscall"
+)
 
 type (
-	AccessChecker    = accessChecker
-	ApiError         = apiError
-	Command          = command
-	ConnTracker      = connTracker
-	Response         = response
-	Ucrednet         = ucrednet
-	UcrednetListener = ucrednetListener
+	AccessChecker = accessChecker
+	ApiError      = apiError
+	Command       = command
+	ConnTracker   = connTracker
+	Response      = response
 )
 
 var (
 	AsyncResponse          = asyncResponse
-	ErrNoID                = errNoID
+	ConnectionKey          = connectionKey
 	NewConnTracker         = newConnTracker
 	OpenAccess             = openAccess
 	StatusUnathorized      = statusUnauthorized
 	StatusMethodNotAllowed = statusMethodNotAllowed
 	StatusInternalError    = statusInternalError
 	SyncResponse           = syncResponse
-	UcrednetGet            = ucrednetGet
 )
 
 func MockApi(mockApi []*Command) (restore func()) {
@@ -51,10 +51,10 @@ func MockApi(mockApi []*Command) (restore func()) {
 	}
 }
 
-func MockGetUcred(fn func(fd, level, opt int) (*sys.Ucred, error)) (restore func()) {
-	orig := getUcred
-	getUcred = fn
+func MockNetutilConnPeerCred(fn func(net.Conn) (*syscall.Ucred, error)) (restore func()) {
+	orig := netutilConnPeerCred
+	netutilConnPeerCred = fn
 	return func() {
-		getUcred = orig
+		netutilConnPeerCred = orig
 	}
 }

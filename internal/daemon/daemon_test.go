@@ -27,6 +27,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -189,6 +190,68 @@ func (s *daemonSuite) TestBasicCommandRouting(c *C) {
 	b, err := io.ReadAll(rsp.Body)
 	c.Check(err, IsNil)
 	c.Check(b, DeepEquals, []byte("{\"type\":\"sync\",\"status-code\":200,\"status\":\"OK\",\"result\":null}"))
+
+	c.Check(d.Stop(), IsNil)
+}
+
+func (s *daemonSuite) TestConnectionRequestBinding(c *C) {
+	var conns []net.Conn
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	complete := make(chan struct{})
+	restore := MockApi([]*Command{
+		{
+			Path: "/v1/foo",
+			GET: func(innerDaemon *Daemon, r *http.Request) Response {
+				conns = append(conns, r.Context().Value(ConnectionKey).(net.Conn))
+				wg.Done()
+				<-complete
+				return SyncResponse(nil)
+			},
+			ReadAccess: OpenAccess,
+		},
+	})
+	defer restore()
+
+	d, err := New()
+	c.Check(err, IsNil)
+
+	c.Check(d.Start(), IsNil)
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			Dial: func(_, _ string) (net.Conn, error) {
+				return net.Dial("unix", paths.ManagerSocket)
+			},
+		},
+	}
+
+	var tmb tomb.Tomb
+	tmb.Go(func() error {
+		communicate := func() error {
+			rsp, err := client.Get("http://localhost/v1/foo")
+			c.Assert(err, IsNil)
+			c.Check(rsp.StatusCode, Equals, 200)
+			b, err := io.ReadAll(rsp.Body)
+			c.Check(err, IsNil)
+			c.Check(b, DeepEquals, []byte("{\"type\":\"sync\",\"status-code\":200,\"status\":\"OK\",\"result\":null}"))
+			return nil
+		}
+		tmb.Go(communicate)
+		tmb.Go(communicate)
+		return nil
+	})
+
+	wg.Wait()
+	c.Assert(conns, HasLen, 2)
+	c.Check(conns[0], NotNil)
+	c.Check(conns[1], NotNil)
+	c.Check(conns[0], Not(Equals), conns[1])
+
+	close(complete)
+	c.Check(tmb.Wait(), IsNil)
 
 	c.Check(d.Stop(), IsNil)
 }

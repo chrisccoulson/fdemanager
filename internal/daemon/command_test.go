@@ -20,12 +20,16 @@
 package daemon_test
 
 import (
+	"context"
+	"net"
 	"net/http"
+	"syscall"
 
 	. "gopkg.in/check.v1"
 
 	"github.com/snapcore/fdemanager/client"
 	. "github.com/snapcore/fdemanager/internal/daemon"
+	"github.com/snapcore/fdemanager/internal/netutil"
 )
 
 type commandSuite struct{}
@@ -43,9 +47,9 @@ func (r *mockResponse) Write(w http.ResponseWriter) {
 	w.Write([]byte("{}"))
 }
 
-type mockAccessCheckerFunc func(*Daemon, *Ucrednet, bool) *ApiError
+type mockAccessCheckerFunc func(*Daemon, *syscall.Ucred, bool) *ApiError
 
-func (fn mockAccessCheckerFunc) CheckAccess(d *Daemon, ucred *Ucrednet, allowInteractive bool) *ApiError {
+func (fn mockAccessCheckerFunc) CheckAccess(d *Daemon, ucred *syscall.Ucred, allowInteractive bool) *ApiError {
 	return fn(d, ucred, allowInteractive)
 }
 
@@ -54,9 +58,9 @@ type testCommandMethodDispatchData struct {
 	accessErr                *ApiError
 	prepareCmd               func(*Command)
 	method                   string
-	remoteAddr               string
 	headers                  http.Header
-	expectedUcred            *Ucrednet
+	peerCred                 *syscall.Ucred
+	peerCredErr              error
 	expectedAllowInteraction bool
 	expectedMethod           string
 	expectedRsp              Response
@@ -95,18 +99,18 @@ func (s *commandSuite) testCommandMethodDispatch(c *C, data *testCommandMethodDi
 		method = "POST"
 		return data.rsp
 	}
-	cmd.ReadAccess = mockAccessCheckerFunc(func(innerDaemon *Daemon, ucred *Ucrednet, allowInteraction bool) *ApiError {
+	cmd.ReadAccess = mockAccessCheckerFunc(func(innerDaemon *Daemon, ucred *syscall.Ucred, allowInteraction bool) *ApiError {
 		c.Assert(access, Equals, "")
 		c.Check(innerDaemon, Equals, d)
-		c.Check(ucred, DeepEquals, data.expectedUcred)
+		c.Check(ucred, DeepEquals, data.peerCred)
 		c.Check(allowInteraction, Equals, data.expectedAllowInteraction)
 		access = "read"
 		return data.accessErr
 	})
-	cmd.WriteAccess = mockAccessCheckerFunc(func(innerDaemon *Daemon, ucred *Ucrednet, allowInteraction bool) *ApiError {
+	cmd.WriteAccess = mockAccessCheckerFunc(func(innerDaemon *Daemon, ucred *syscall.Ucred, allowInteraction bool) *ApiError {
 		c.Assert(access, Equals, "")
 		c.Check(innerDaemon, Equals, d)
-		c.Check(ucred, DeepEquals, data.expectedUcred)
+		c.Check(ucred, DeepEquals, data.peerCred)
 		c.Check(allowInteraction, Equals, data.expectedAllowInteraction)
 		access = "write"
 		return data.accessErr
@@ -115,12 +119,23 @@ func (s *commandSuite) testCommandMethodDispatch(c *C, data *testCommandMethodDi
 		data.prepareCmd(cmd)
 	}
 
+	conn := new(net.UnixConn)
+	ctx := context.WithValue(context.Background(), ConnectionKey, conn)
+
 	var err error
-	req, err = http.NewRequest(data.method, "", nil)
+	req, err = http.NewRequestWithContext(ctx, data.method, "", nil)
 	c.Assert(err, IsNil)
 
-	req.RemoteAddr = data.remoteAddr
 	req.Header = data.headers
+
+	restore := MockNetutilConnPeerCred(func(innerConn net.Conn) (*syscall.Ucred, error) {
+		c.Check(innerConn, Equals, conn)
+		if data.peerCredErr != nil {
+			return nil, data.peerCredErr
+		}
+		return data.peerCred, nil
+	})
+	defer restore()
 
 	rsp := cmd.Run(d, req)
 	c.Check(rsp, DeepEquals, data.expectedRsp)
@@ -131,8 +146,7 @@ func (s *commandSuite) TestCommandMethodDispatchGet(c *C) {
 	s.testCommandMethodDispatch(c, &testCommandMethodDispatchData{
 		rsp:            &mockResponse{200},
 		method:         "GET",
-		remoteAddr:     "pid=100;uid=1001;socket=/run/foo.socket;",
-		expectedUcred:  &Ucrednet{Pid: 100, Uid: 1001, Socket: "/run/foo.socket"},
+		peerCred:       &syscall.Ucred{Pid: 100, Uid: 1001, Gid: 1001},
 		expectedMethod: "GET",
 		expectedRsp:    &mockResponse{200},
 	})
@@ -140,11 +154,10 @@ func (s *commandSuite) TestCommandMethodDispatchGet(c *C) {
 
 func (s *commandSuite) TestCommandMethodDispatchGetDenied(c *C) {
 	s.testCommandMethodDispatch(c, &testCommandMethodDispatchData{
-		accessErr:     StatusUnathorized("some error"),
-		method:        "GET",
-		remoteAddr:    "pid=100;uid=1001;socket=/run/foo.socket;",
-		expectedUcred: &Ucrednet{Pid: 100, Uid: 1001, Socket: "/run/foo.socket"},
-		expectedRsp:   StatusUnathorized("some error"),
+		accessErr:   StatusUnathorized("some error"),
+		method:      "GET",
+		peerCred:    &syscall.Ucred{Pid: 100, Uid: 1001, Gid: 1001},
+		expectedRsp: StatusUnathorized("some error"),
 	})
 }
 
@@ -152,8 +165,7 @@ func (s *commandSuite) TestCommandMethodDispatchPost(c *C) {
 	s.testCommandMethodDispatch(c, &testCommandMethodDispatchData{
 		rsp:            &mockResponse{200},
 		method:         "POST",
-		remoteAddr:     "pid=100;uid=1001;socket=/run/foo.socket;",
-		expectedUcred:  &Ucrednet{Pid: 100, Uid: 1001, Socket: "/run/foo.socket"},
+		peerCred:       &syscall.Ucred{Pid: 100, Uid: 1001, Gid: 1001},
 		expectedMethod: "POST",
 		expectedRsp:    &mockResponse{200},
 	})
@@ -161,11 +173,10 @@ func (s *commandSuite) TestCommandMethodDispatchPost(c *C) {
 
 func (s *commandSuite) TestCommandMethodDispatchPostDenied(c *C) {
 	s.testCommandMethodDispatch(c, &testCommandMethodDispatchData{
-		accessErr:     StatusUnathorized("some error"),
-		method:        "POST",
-		remoteAddr:    "pid=100;uid=1001;socket=/run/foo.socket;",
-		expectedUcred: &Ucrednet{Pid: 100, Uid: 1001, Socket: "/run/foo.socket"},
-		expectedRsp:   StatusUnathorized("some error"),
+		accessErr:   StatusUnathorized("some error"),
+		method:      "POST",
+		peerCred:    &syscall.Ucred{Pid: 100, Uid: 1001, Gid: 1001},
+		expectedRsp: StatusUnathorized("some error"),
 	})
 }
 
@@ -173,8 +184,7 @@ func (s *commandSuite) TestCommandMethodDispatchPut(c *C) {
 	s.testCommandMethodDispatch(c, &testCommandMethodDispatchData{
 		rsp:            &mockResponse{200},
 		method:         "PUT",
-		remoteAddr:     "pid=100;uid=1001;socket=/run/foo.socket;",
-		expectedUcred:  &Ucrednet{Pid: 100, Uid: 1001, Socket: "/run/foo.socket"},
+		peerCred:       &syscall.Ucred{Pid: 100, Uid: 1001, Gid: 1001},
 		expectedMethod: "PUT",
 		expectedRsp:    &mockResponse{200},
 	})
@@ -182,11 +192,10 @@ func (s *commandSuite) TestCommandMethodDispatchPut(c *C) {
 
 func (s *commandSuite) TestCommandMethodDispatchPutDenied(c *C) {
 	s.testCommandMethodDispatch(c, &testCommandMethodDispatchData{
-		accessErr:     StatusUnathorized("some error"),
-		method:        "PUT",
-		remoteAddr:    "pid=100;uid=1001;socket=/run/foo.socket;",
-		expectedUcred: &Ucrednet{Pid: 100, Uid: 1001, Socket: "/run/foo.socket"},
-		expectedRsp:   StatusUnathorized("some error"),
+		accessErr:   StatusUnathorized("some error"),
+		method:      "PUT",
+		peerCred:    &syscall.Ucred{Pid: 100, Uid: 1001, Gid: 1001},
+		expectedRsp: StatusUnathorized("some error"),
 	})
 }
 
@@ -194,8 +203,7 @@ func (s *commandSuite) TestCommandMethodDispatchDifferentCred(c *C) {
 	s.testCommandMethodDispatch(c, &testCommandMethodDispatchData{
 		rsp:            &mockResponse{200},
 		method:         "GET",
-		remoteAddr:     "pid=5;uid=1;socket=/run/foo.socket;",
-		expectedUcred:  &Ucrednet{Pid: 5, Uid: 1, Socket: "/run/foo.socket"},
+		peerCred:       &syscall.Ucred{Pid: 5, Uid: 1, Gid: 1},
 		expectedMethod: "GET",
 		expectedRsp:    &mockResponse{200},
 	})
@@ -221,11 +229,31 @@ func (s *commandSuite) TestCommandMethodDispatchAllowInteractionAuth(c *C) {
 	s.testCommandMethodDispatch(c, &testCommandMethodDispatchData{
 		rsp:                      &mockResponse{200},
 		method:                   "GET",
-		remoteAddr:               "pid=100;uid=1001;socket=/run/foo.socket;",
 		headers:                  http.Header{client.AllowInteractionHeader: []string{"1"}},
-		expectedUcred:            &Ucrednet{Pid: 100, Uid: 1001, Socket: "/run/foo.socket"},
+		peerCred:                 &syscall.Ucred{Pid: 100, Uid: 1001, Gid: 1001},
 		expectedAllowInteraction: true,
 		expectedMethod:           "GET",
 		expectedRsp:              &mockResponse{200},
 	})
+}
+
+func (s *commandSuite) TestCommandMethodDispatchPeerCredErr(c *C) {
+	s.testCommandMethodDispatch(c, &testCommandMethodDispatchData{
+		method:      "GET",
+		peerCredErr: netutil.ErrNoPeerCred,
+		expectedRsp: &ApiError{
+			Status:  500,
+			Message: "connection has no peer credential",
+		},
+	})
+}
+
+func (s *commandSuite) TestCommandMethodDispatchNoLinkedConnection(c *C) {
+	d := new(Daemon)
+
+	req, err := http.NewRequestWithContext(context.Background(), "GET", "", nil)
+	c.Assert(err, IsNil)
+
+	cmd := new(Command)
+	c.Check(func() { cmd.Run(d, req) }, PanicMatches, `no connection associated with request`)
 }
