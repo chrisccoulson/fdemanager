@@ -21,21 +21,11 @@ package daemon
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
+	"github.com/snapcore/fdemanager/api"
 	"github.com/snapcore/snapd/logger"
-)
-
-// responseType is the response type
-type responseType string
-
-// "there are three standard return types: Standard return value,
-// Background operation, Error", each returning a JSON object with the
-// following "type" field:
-const (
-	responseTypeSync  responseType = "sync"
-	responseTypeAsync responseType = "async"
-	responseTypeError responseType = "error"
 )
 
 // response represents a response.
@@ -43,18 +33,9 @@ type response interface {
 	Write(w http.ResponseWriter)
 }
 
-// respJSON represents our standard JSON response format.
-type respJSON struct {
-	Type       responseType `json:"type"`
-	Status     int          `json:"status-code"`
-	StatusText string       `json:"status"`
-	Result     interface{}  `json:"result"`
-	Change     string       `json:"change,omitempty"`
-}
-
 // resp is the standard response implementation
 type resp struct {
-	Type responseType
+	Type api.ResponseType
 
 	// Status is the HTTP status code.
 	Status int
@@ -67,11 +48,15 @@ type resp struct {
 }
 
 func (r *resp) MarshalJSON() ([]byte, error) {
-	return json.Marshal(&respJSON{
+	result, err := json.Marshal(r.Result)
+	if err != nil {
+		return nil, fmt.Errorf("cannot marshal result: %w", err)
+	}
+	return json.Marshal(&api.Response{
 		Type:       r.Type,
-		Status:     r.Status,
+		StatusCode: r.Status,
 		StatusText: http.StatusText(r.Status),
-		Result:     r.Result,
+		Result:     result,
 		Change:     r.Change,
 	})
 }
@@ -82,11 +67,11 @@ func (r *resp) Write(w http.ResponseWriter) {
 	if err != nil {
 		logger.Noticef("cannot marshal %#v to JSON: %v", *r, err)
 		b = nil
-		status = 500
+		status = http.StatusInternalServerError
 	}
 
 	hdr := w.Header()
-	if r.Status == 202 || r.Status == 201 {
+	if r.Status == http.StatusAccepted || r.Status == http.StatusCreated {
 		if m, ok := r.Result.(map[string]interface{}); ok {
 			if location, ok := m["resource"]; ok {
 				if location, ok := location.(string); ok && location != "" {
@@ -106,8 +91,8 @@ var _ response = (*resp)(nil)
 // syncResponse builds a "sync" response from the given result.
 func syncResponse(result interface{}) response {
 	return &resp{
-		Type:   responseTypeSync,
-		Status: 200,
+		Type:   api.ResponseTypeSync,
+		Status: http.StatusOK,
 		Result: result,
 	}
 }
@@ -115,8 +100,8 @@ func syncResponse(result interface{}) response {
 // asyncResponse builds an "async" response for a created change
 func asyncResponse(result interface{}, change string) response {
 	return &resp{
-		Type:   responseTypeAsync,
-		Status: 202,
+		Type:   api.ResponseTypeAsync,
+		Status: http.StatusAccepted,
 		Result: result,
 		Change: change,
 	}

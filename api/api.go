@@ -16,6 +16,8 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
  */
-package daemon
 
-var apiCommands = []*command{}
+// Package api provides types used by the fdemanager REST API and shared between the client and service.
+package api
+
+const AllowInteractionHeader = "X-Allow-Interaction"

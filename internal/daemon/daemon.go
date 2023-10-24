@@ -17,6 +17,7 @@
  *
  */
 
+// Package daemon provides the fdemanager service REST API.
 package daemon
 
 import (
@@ -174,7 +175,7 @@ func (cd *commandDispatcher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (d *Daemon) addRoutes() {
 	d.router = mux.NewRouter()
 
-	for _, c := range api {
+	for _, c := range apiCommands {
 		dispatcher := &commandDispatcher{d: d, c: c}
 
 		if c.PathPrefix == "" {

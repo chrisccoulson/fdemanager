@@ -24,7 +24,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/snapcore/fdemanager/client"
+	"github.com/snapcore/fdemanager/api"
 	"github.com/snapcore/fdemanager/internal/netutil"
 	"github.com/snapcore/snapd/logger"
 )
@@ -65,13 +65,13 @@ func (c *command) Run(d *Daemon, r *http.Request) response {
 	var access accessChecker
 
 	switch r.Method {
-	case "GET":
+	case http.MethodGet:
 		rspf = c.GET
 		access = c.ReadAccess
-	case "PUT":
+	case http.MethodPut:
 		rspf = c.PUT
 		access = c.WriteAccess
-	case "POST":
+	case http.MethodPost:
 		rspf = c.POST
 		access = c.WriteAccess
 	}
@@ -84,12 +84,12 @@ func (c *command) Run(d *Daemon, r *http.Request) response {
 	}
 
 	allowInteraction := false
-	allowHeader := r.Header.Get(client.AllowInteractionHeader)
+	allowHeader := r.Header.Get(api.AllowInteractionHeader)
 	if allowHeader != "" {
 		var err error
 		allowInteraction, err = strconv.ParseBool(allowHeader)
 		if err != nil {
-			logger.Noticef("error parsing %s header: %s", client.AllowInteractionHeader, err)
+			logger.Noticef("error parsing %s header: %s", api.AllowInteractionHeader, err)
 		}
 	}
 	if err := access.CheckAccess(d, ucred, allowInteraction); err != nil {

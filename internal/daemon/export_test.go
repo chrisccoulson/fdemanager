@@ -43,11 +43,11 @@ var (
 	SyncResponse           = syncResponse
 )
 
-func MockApi(mockApi []*Command) (restore func()) {
-	orig := api
-	api = mockApi
+func MockApiCommands(mockApi []*Command) (restore func()) {
+	orig := apiCommands
+	apiCommands = mockApi
 	return func() {
-		api = orig
+		apiCommands = orig
 	}
 }
 

@@ -16,6 +16,17 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
  */
-package daemon
 
-var apiCommands = []*command{}
+package api
+
+import "encoding/json"
+
+// ErrorKind describes the kind of error
+type ErrorKind string
+
+// ErrorResult contains information about an error
+type ErrorResult struct {
+	Kind    ErrorKind       `json:"kind,omitempty"`
+	Message string          `json:"message"`
+	Value   json.RawMessage `json:"value,omitempty"`
+}

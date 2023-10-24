@@ -17,11 +17,24 @@
  *
  */
 
-package client
+package api
 
-type ErrorKind string
+import "encoding/json"
+
+// ResponseType is the response type
+type ResponseType string
 
 const (
-	// ErrorKindDaemonRestart: daemon is restarting.
-	ErrorKindDaemonRestart ErrorKind = "daemon-restart"
+	ResponseTypeSync  ResponseType = "sync"
+	ResponseTypeAsync ResponseType = "async"
+	ResponseTypeError ResponseType = "error"
 )
+
+// Response is the standard response
+type Response struct {
+	Type       ResponseType    `json:"type"`
+	StatusCode int             `json:"status-code"`
+	StatusText string          `json:"status"`
+	Result     json.RawMessage `json:"result"`
+	Change     string          `json:"change,omitempty"`
+}

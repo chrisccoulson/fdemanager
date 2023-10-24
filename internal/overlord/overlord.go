@@ -19,7 +19,7 @@
  *
  */
 
-// Package overlord implements the overall control of a snappy system.
+// Package overlord implements the overall control of the fdemanager service.
 package overlord
 
 import (

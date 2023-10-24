@@ -160,7 +160,7 @@ func (s *daemonSuite) TestNotFoundHandler(c *C) {
 }
 
 func (s *daemonSuite) TestBasicCommandRouting(c *C) {
-	restore := MockApi([]*Command{
+	restore := MockApiCommands([]*Command{
 		{
 			Path: "/v1/foo",
 			GET: func(innerDaemon *Daemon, r *http.Request) Response {
@@ -189,7 +189,7 @@ func (s *daemonSuite) TestBasicCommandRouting(c *C) {
 	c.Check(rsp.StatusCode, Equals, 200)
 	b, err := io.ReadAll(rsp.Body)
 	c.Check(err, IsNil)
-	c.Check(b, DeepEquals, []byte("{\"type\":\"sync\",\"status-code\":200,\"status\":\"OK\",\"result\":null}"))
+	c.Check(b, DeepEquals, []byte(`{"type":"sync","status-code":200,"status":"OK","result":null}`))
 
 	c.Check(d.Stop(), IsNil)
 }
@@ -201,7 +201,7 @@ func (s *daemonSuite) TestConnectionRequestBinding(c *C) {
 	wg.Add(2)
 
 	complete := make(chan struct{})
-	restore := MockApi([]*Command{
+	restore := MockApiCommands([]*Command{
 		{
 			Path: "/v1/foo",
 			GET: func(innerDaemon *Daemon, r *http.Request) Response {
@@ -236,7 +236,7 @@ func (s *daemonSuite) TestConnectionRequestBinding(c *C) {
 			c.Check(rsp.StatusCode, Equals, 200)
 			b, err := io.ReadAll(rsp.Body)
 			c.Check(err, IsNil)
-			c.Check(b, DeepEquals, []byte("{\"type\":\"sync\",\"status-code\":200,\"status\":\"OK\",\"result\":null}"))
+			c.Check(b, DeepEquals, []byte(`{"type":"sync","status-code":200,"status":"OK","result":null}`))
 			return nil
 		}
 		tmb.Go(communicate)

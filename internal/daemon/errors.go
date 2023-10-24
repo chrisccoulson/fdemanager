@@ -20,10 +20,11 @@
 package daemon
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 
-	"github.com/snapcore/fdemanager/client"
+	"github.com/snapcore/fdemanager/api"
 )
 
 // apiError represents an error meant for returning to the client.
@@ -33,15 +34,15 @@ type apiError struct {
 	Status  int
 	Message string
 	// Kind is the error kind. See client/errors.go
-	Kind  client.ErrorKind
-	Value errorValue
+	Kind  api.ErrorKind
+	Value any
 }
 
 func (ae *apiError) Error() string {
 	kindOrStatus := "api"
 	if ae.Kind != "" {
 		kindOrStatus = fmt.Sprintf("api: %s", ae.Kind)
-	} else if ae.Status != 400 {
+	} else if ae.Status != http.StatusBadRequest {
 		kindOrStatus = fmt.Sprintf("api %d", ae.Status)
 	}
 	return fmt.Sprintf("%s (%s)", ae.Message, kindOrStatus)
@@ -52,13 +53,17 @@ func (ae *apiError) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (ae *apiError) Write(w http.ResponseWriter) {
+	value, err := json.Marshal(ae.Value)
+	if err != nil {
+		value, _ = json.Marshal(fmt.Sprintf("cannot encode value: %v", err))
+	}
 	rsp := &resp{
-		Type:   responseTypeError,
+		Type:   api.ResponseTypeError,
 		Status: ae.Status,
-		Result: &errorResult{
+		Result: &api.ErrorResult{
 			Message: ae.Message,
 			Kind:    ae.Kind,
-			Value:   ae.Value,
+			Value:   value,
 		},
 	}
 	rsp.Write(w)
@@ -67,15 +72,6 @@ func (ae *apiError) Write(w http.ResponseWriter) {
 // check it implements response
 var _ response = (*apiError)(nil)
 var _ error = (*apiError)(nil)
-
-type errorValue interface{}
-
-type errorResult struct {
-	Message string `json:"message"` // note no omitempty
-	// Kind is the error kind. See client/errors.go
-	Kind  client.ErrorKind `json:"kind,omitempty"`
-	Value errorValue       `json:"value,omitempty"`
-}
 
 // errorResponder is a callable that produces an error Response.
 // e.g., InternalError("something broke: %v", err), etc.
@@ -99,11 +95,11 @@ func makeErrorResponder(status int) errorResponder {
 
 // standard error responses
 var (
-	statusUnauthorized     = makeErrorResponder(401)
-	statusNotFound         = makeErrorResponder(404)
-	statusBadRequest       = makeErrorResponder(400)
-	statusMethodNotAllowed = makeErrorResponder(405)
-	statusInternalError    = makeErrorResponder(500)
-	statusNotImplemented   = makeErrorResponder(501)
-	statusForbidden        = makeErrorResponder(403)
+	statusUnauthorized     = makeErrorResponder(http.StatusUnauthorized)
+	statusNotFound         = makeErrorResponder(http.StatusNotFound)
+	statusBadRequest       = makeErrorResponder(http.StatusBadRequest)
+	statusMethodNotAllowed = makeErrorResponder(http.StatusMethodNotAllowed)
+	statusInternalError    = makeErrorResponder(http.StatusInternalServerError)
+	statusNotImplemented   = makeErrorResponder(http.StatusNotImplemented)
+	statusForbidden        = makeErrorResponder(http.StatusForbidden)
 )
