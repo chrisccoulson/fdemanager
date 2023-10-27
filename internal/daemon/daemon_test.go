@@ -33,6 +33,7 @@ import (
 	"time"
 
 	. "github.com/snapcore/fdemanager/internal/daemon"
+	"github.com/snapcore/fdemanager/internal/netutil"
 	"github.com/snapcore/fdemanager/internal/paths"
 	"github.com/snapcore/snapd/testutil"
 	. "gopkg.in/check.v1"
@@ -163,7 +164,7 @@ func (s *daemonSuite) TestBasicCommandRouting(c *C) {
 	restore := MockApiCommands([]*Command{
 		{
 			Path: "/v1/foo",
-			GET: func(innerDaemon *Daemon, r *http.Request) Response {
+			GET: func(innerDaemon *Daemon, params map[string]string, body io.Reader) Response {
 				return SyncResponse(nil)
 			},
 			ReadAccess: OpenAccess,
@@ -196,16 +197,19 @@ func (s *daemonSuite) TestBasicCommandRouting(c *C) {
 
 func (s *daemonSuite) TestConnectionRequestBinding(c *C) {
 	var conns []net.Conn
+	restore := MockNetutilConnPeerCred(func(conn net.Conn) (*syscall.Ucred, error) {
+		conns = append(conns, conn)
+		return netutil.ConnPeerCred(conn)
+	})
+	defer restore()
 
 	var wg sync.WaitGroup
 	wg.Add(2)
-
 	complete := make(chan struct{})
-	restore := MockApiCommands([]*Command{
+	restore = MockApiCommands([]*Command{
 		{
 			Path: "/v1/foo",
-			GET: func(innerDaemon *Daemon, r *http.Request) Response {
-				conns = append(conns, r.Context().Value(ConnectionKey).(net.Conn))
+			GET: func(innerDaemon *Daemon, params map[string]string, body io.Reader) Response {
 				wg.Done()
 				<-complete
 				return SyncResponse(nil)

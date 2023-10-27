@@ -21,6 +21,7 @@ package daemon
 
 import (
 	"net"
+	"net/http"
 	"syscall"
 )
 
@@ -48,6 +49,14 @@ func MockApiCommands(mockApi []*Command) (restore func()) {
 	apiCommands = mockApi
 	return func() {
 		apiCommands = orig
+	}
+}
+
+func MockMuxVars(fn func(*http.Request) map[string]string) (restore func()) {
+	orig := muxVars
+	muxVars = fn
+	return func() {
+		muxVars = orig
 	}
 }
 

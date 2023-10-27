@@ -20,19 +20,24 @@
 package daemon
 
 import (
+	"io"
 	"net"
 	"net/http"
 	"strconv"
 
+	"github.com/gorilla/mux"
 	"github.com/snapcore/fdemanager/api"
 	"github.com/snapcore/fdemanager/internal/netutil"
 	"github.com/snapcore/snapd/logger"
 )
 
-var netutilConnPeerCred = netutil.ConnPeerCred
+var (
+	muxVars             = mux.Vars
+	netutilConnPeerCred = netutil.ConnPeerCred
+)
 
 // A responseFunc handles one of the individual verbs for a method
-type responseFunc func(*Daemon, *http.Request) response
+type responseFunc func(*Daemon, map[string]string, io.Reader) response
 
 // A command routes a request to an individual per-verb responseFUnc
 type command struct {
@@ -96,5 +101,5 @@ func (c *command) Run(d *Daemon, r *http.Request) response {
 		return err
 	}
 
-	return rspf(d, r)
+	return rspf(d, muxVars(r), r.Body)
 }

@@ -21,6 +21,7 @@ package daemon_test
 
 import (
 	"context"
+	"io"
 	"net"
 	"net/http"
 	"syscall"
@@ -70,32 +71,43 @@ type testCommandMethodDispatchData struct {
 func (s *commandSuite) testCommandMethodDispatch(c *C, data *testCommandMethodDispatchData) {
 	d := new(Daemon)
 
+	params := map[string]string{"foo": "bar"}
+
 	var req *http.Request
 	var access string
 	var method string
 
+	restore := MockMuxVars(func(innerReq *http.Request) map[string]string {
+		c.Check(innerReq, Equals, req)
+		return params
+	})
+	defer restore()
+
 	cmd := new(Command)
-	cmd.GET = func(innerDaemon *Daemon, innerReq *http.Request) Response {
+	cmd.GET = func(innerDaemon *Daemon, innerParams map[string]string, body io.Reader) Response {
 		c.Assert(method, Equals, "")
 		c.Check(access, Equals, "read")
 		c.Check(innerDaemon, Equals, d)
-		c.Check(innerReq, Equals, req)
+		c.Check(innerParams, DeepEquals, params)
+		c.Check(body, Equals, req.Body)
 		method = http.MethodGet
 		return data.rsp
 	}
-	cmd.PUT = func(innerDaemon *Daemon, innerReq *http.Request) Response {
+	cmd.PUT = func(innerDaemon *Daemon, innerParams map[string]string, body io.Reader) Response {
 		c.Assert(method, Equals, "")
 		c.Check(access, Equals, "write")
 		c.Check(innerDaemon, Equals, d)
-		c.Check(innerReq, Equals, req)
+		c.Check(innerParams, DeepEquals, params)
+		c.Check(body, Equals, req.Body)
 		method = http.MethodPut
 		return data.rsp
 	}
-	cmd.POST = func(innerDaemon *Daemon, innerReq *http.Request) Response {
+	cmd.POST = func(innerDaemon *Daemon, innerParams map[string]string, body io.Reader) Response {
 		c.Assert(method, Equals, "")
 		c.Check(access, Equals, "write")
 		c.Check(innerDaemon, Equals, d)
-		c.Check(innerReq, Equals, req)
+		c.Check(innerParams, DeepEquals, params)
+		c.Check(body, Equals, req.Body)
 		method = http.MethodPost
 		return data.rsp
 	}
@@ -128,7 +140,7 @@ func (s *commandSuite) testCommandMethodDispatch(c *C, data *testCommandMethodDi
 
 	req.Header = data.headers
 
-	restore := MockNetutilConnPeerCred(func(innerConn net.Conn) (*syscall.Ucred, error) {
+	restore = MockNetutilConnPeerCred(func(innerConn net.Conn) (*syscall.Ucred, error) {
 		c.Check(innerConn, Equals, conn)
 		if data.peerCredErr != nil {
 			return nil, data.peerCredErr
